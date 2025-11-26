@@ -77,56 +77,58 @@ app.post("/reviews", async (req, res) => {
       video: video || ""
     };
 
-    // 1) Existing metafield read karo
-    let existingMetafield = null;
+    // 👉 NEW namespace + key (purane se clash nahi hoga)
+    const NS = "aranyat_custom";
+    const KEY = "reviews_json";
 
-    const mfResult = await shopifyRequest(
-      `/metafields.json?metafield[owner_id]=${productId}` +
-        `&metafield[owner_resource]=product` +
-        `&metafield[namespace]=aranyat` +
-        `&metafield[key]=reviews`,
+    // 1) Existing metafield read karo
+    const result = await shopifyRequest(
+      `/products/${productId}/metafields.json?namespace=${NS}&key=${KEY}`,
       { method: "GET" }
     );
 
-    const metafields = (mfResult && mfResult.metafields) || [];
-    if (metafields.length > 0) {
-      existingMetafield = metafields[0];
-    }
+    const metafields = (result && result.metafields) || [];
+    const existing = metafields[0];
 
     let reviewsArray = [];
-    if (existingMetafield && existingMetafield.value) {
+    if (existing && existing.value) {
       try {
-        const parsed = JSON.parse(existingMetafield.value);
+        const parsed = JSON.parse(existing.value);
         if (Array.isArray(parsed)) reviewsArray = parsed;
       } catch (e) {
-        console.error("JSON parse error (old metafield value)", e);
+        console.error("Could not parse existing reviews JSON", e);
       }
     }
 
-    // 2) Naya review sabse upar add karo
+    // naya review sabse upar daal do
     reviewsArray.unshift(newReview);
 
-    const metafieldPayload = {
-      metafield: {
-        namespace: "aranyat",
-        key: "reviews",
-        type: "json",
-        value: JSON.stringify(reviewsArray),
-        owner_resource: "product",
-        owner_id: Number(productId)
-      }
-    };
-
-    // 3) Metafield create ya update
-    if (existingMetafield && existingMetafield.id) {
-      await shopifyRequest(`/metafields/${existingMetafield.id}.json`, {
+    if (existing && existing.id) {
+      // existing record par sirf value update karo
+      await shopifyRequest(`/metafields/${existing.id}.json`, {
         method: "PUT",
-        body: JSON.stringify(metafieldPayload)
+        body: JSON.stringify({
+          metafield: {
+            id: existing.id,
+            value: JSON.stringify(reviewsArray),
+            type: existing.type || "json"
+          }
+        })
       });
     } else {
+      // naya metafield create karo
       await shopifyRequest(`/metafields.json`, {
         method: "POST",
-        body: JSON.stringify(metafieldPayload)
+        body: JSON.stringify({
+          metafield: {
+            namespace: NS,
+            key: KEY,
+            type: "json",
+            value: JSON.stringify(reviewsArray),
+            owner_resource: "product",
+            owner_id: Number(productId)
+          }
+        })
       });
     }
 
