@@ -3,11 +3,14 @@ import express from "express";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const SHOPIFY_STORE = "smnf7g-bg"; 
-const SHOPIFY_ADMIN_VERSION = "2024-01";
+// 👇 yahi tumhara store subdomain hai (admin URL me jo smnf7g-bg dikh raha tha)
+const SHOPIFY_STORE = "smnf7g-bg";
+const SHOPIFY_API_VERSION = "2024-01";
 const SHOPIFY_ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
 app.use(express.json());
+
+// CORS: theme se call allow
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -16,8 +19,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Helper: Shopify REST Admin API call
 async function shopifyRequest(path, options = {}) {
-  const url = `https://${SHOPIFY_STORE}.myshopify.com/admin/api/${SHOPIFY_ADMIN_VERSION}${path}`;
+  const url = `https://${SHOPIFY_STORE}.myshopify.com/admin/api/${SHOPIFY_API_VERSION}${path}`;
 
   const res = await fetch(url, {
     ...options,
@@ -25,14 +29,24 @@ async function shopifyRequest(path, options = {}) {
       "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
       "Content-Type": "application/json",
       ...(options.headers || {})
-    },
+    }
   });
 
-  if (!res.ok) throw new Error("Shopify API Error " + res.status);
+  const text = await res.text();
 
-  return res.json();
+  if (!res.ok) {
+    console.error("Shopify error", res.status, text);
+    throw new Error(`Shopify API error ${res.status}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
 }
 
+// POST /reviews : yahin se Shopify theme hit karega
 app.post("/reviews", async (req, res) => {
   try {
     const {
@@ -47,32 +61,49 @@ app.post("/reviews", async (req, res) => {
       video
     } = req.body;
 
+    if (!productId) {
+      return res.status(400).json({ error: "productId required" });
+    }
+
     const newReview = {
       name,
       email,
       rating,
       title,
       text,
-      verified: true,
-      date: new Date().toISOString().slice(0,10),
+      verified: !!verified,
+      date: new Date().toISOString().slice(0, 10),
       photo: photo || "",
       video: video || ""
     };
 
-    let metafield;
-    try {
-      const result = await shopifyRequest(
-        `/products/${productId}/metafields.json?namespace=aranyat&key=reviews`,
-        { method: "GET" }
-      );
-      metafield = result.metafields && result.metafields[0];
-    } catch {}
+    // 1) Existing metafield read karo
+    let existingMetafield = null;
 
-    let reviewsArray = [];
-    if (metafield && metafield.value) {
-      try { reviewsArray = JSON.parse(metafield.value); } catch {}
+    const mfResult = await shopifyRequest(
+      `/metafields.json?metafield[owner_id]=${productId}` +
+        `&metafield[owner_resource]=product` +
+        `&metafield[namespace]=aranyat` +
+        `&metafield[key]=reviews`,
+      { method: "GET" }
+    );
+
+    const metafields = (mfResult && mfResult.metafields) || [];
+    if (metafields.length > 0) {
+      existingMetafield = metafields[0];
     }
 
+    let reviewsArray = [];
+    if (existingMetafield && existingMetafield.value) {
+      try {
+        const parsed = JSON.parse(existingMetafield.value);
+        if (Array.isArray(parsed)) reviewsArray = parsed;
+      } catch (e) {
+        console.error("JSON parse error (old metafield value)", e);
+      }
+    }
+
+    // 2) Naya review sabse upar add karo
     reviewsArray.unshift(newReview);
 
     const metafieldPayload = {
@@ -86,25 +117,26 @@ app.post("/reviews", async (req, res) => {
       }
     };
 
-    let saved;
-    if (metafield && metafield.id) {
-      saved = await shopifyRequest(`/metafields/${metafield.id}.json`, {
+    // 3) Metafield create ya update
+    if (existingMetafield && existingMetafield.id) {
+      await shopifyRequest(`/metafields/${existingMetafield.id}.json`, {
         method: "PUT",
         body: JSON.stringify(metafieldPayload)
       });
     } else {
-      saved = await shopifyRequest(`/metafields.json`, {
+      await shopifyRequest(`/metafields.json`, {
         method: "POST",
         body: JSON.stringify(metafieldPayload)
       });
     }
 
     return res.json({ success: true, review: newReview });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error("API /reviews error", err);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
 app.listen(PORT, () => {
-  console.log("Server running");
+  console.log(`Aranyat reviews API running on port ${PORT}`);
 });
