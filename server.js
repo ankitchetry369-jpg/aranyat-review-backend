@@ -3,14 +3,14 @@ import express from "express";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 👇 yahi tumhara store subdomain hai (admin URL me jo smnf7g-bg dikh raha tha)
+// tumhara store subdomain
 const SHOPIFY_STORE = "smnf7g-bg";
 const SHOPIFY_API_VERSION = "2024-01";
 const SHOPIFY_ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
 app.use(express.json());
 
-// CORS: theme se call allow
+// CORS allow
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -19,7 +19,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper: Shopify REST Admin API call
+// Shopify REST helper
 async function shopifyRequest(path, options = {}) {
   const url = `https://${SHOPIFY_STORE}.myshopify.com/admin/api/${SHOPIFY_API_VERSION}${path}`;
 
@@ -77,11 +77,11 @@ app.post("/reviews", async (req, res) => {
       video: video || ""
     };
 
-    // 👉 NEW namespace + key (purane se clash nahi hoga)
-    const NS = "aranyat_custom";
-    const KEY = "reviews_json";
+    // 👇 bilkul naya namespace + key (kabhi use nahi hua hoga)
+    const NS = "aranyat_backend2";
+    const KEY = "reviews_json_v2";
 
-    // 1) Existing metafield read karo
+    // 1) existing metafield read
     const result = await shopifyRequest(
       `/products/${productId}/metafields.json?namespace=${NS}&key=${KEY}`,
       { method: "GET" }
@@ -100,11 +100,11 @@ app.post("/reviews", async (req, res) => {
       }
     }
 
-    // naya review sabse upar daal do
+    // naya review sabse upar
     reviewsArray.unshift(newReview);
 
     if (existing && existing.id) {
-      // existing record par sirf value update karo
+      // sirf value update (namespace/key/type nahi छूना)
       await shopifyRequest(`/metafields/${existing.id}.json`, {
         method: "PUT",
         body: JSON.stringify({
@@ -116,7 +116,7 @@ app.post("/reviews", async (req, res) => {
         })
       });
     } else {
-      // naya metafield create karo
+      // bilkul naya metafield create
       await shopifyRequest(`/metafields.json`, {
         method: "POST",
         body: JSON.stringify({
